@@ -1,6 +1,11 @@
 ---
 name: ai-search-files
-description: Make a website's blog readable by search engines and AI answer engines (ChatGPT, Claude, Perplexity, Gemini, Copilot): auto-generated llms.txt and llms-full.txt, a sitemap with every post, robots rules for AI crawlers, BlogPosting + FAQPage JSON-LD, IndexNow pings, and AI-referral tracking in PostHog. Use when the user asks about GEO, AEO, llms.txt, sitemaps, schema, getting cited by ChatGPT, or why AI tools don't mention their site.
+description: Make a website's blog readable by search engines and AI answer engines (ChatGPT, Claude, Perplexity, Gemini, Copilot) with auto-generated llms.txt and llms-full.txt, a sitemap with every post, robots rules for AI crawlers, BlogPosting + FAQPage JSON-LD, IndexNow pings, and AI-referral tracking in PostHog. Use when the user asks about GEO, AEO, llms.txt, sitemaps, robots.txt for AI bots, schema / JSON-LD, IndexNow, getting cited by ChatGPT, or why AI tools don't mention their site. Not for writing the posts themselves (use wordpress-blog or seo-engine).
+license: MIT
+compatibility: Templates target Next.js App Router (TypeScript) and read posts from a WordPress REST API; the logic ports to any framework. IndexNow key, Google Search Console and PostHog are optional.
+metadata:
+  author: KevBuildsApps
+  version: 1.0.0
 ---
 
 # AI search files (GEO / AEO)
@@ -54,10 +59,43 @@ AI referrals arrive as a referring domain (`chatgpt.com`, `perplexity.ai`, `clau
 families for the Traffic sources card. The seo-engine `measure.mjs` stores AI visitors per post
 (`seo_metrics_daily.ai_visitors`) and uses them in the cluster weights.
 
-## Gotchas
+## Examples
 
-- A build-time render of the sitemap or llms.txt can snapshot an **empty** post list if WordPress is
-  only reachable on a private network during the build. Fall back to the public origin, or render
-  on request with `revalidate`.
-- Don't block `/blog/wp-json` at your proxy if your app reads posts through it.
-- Decode WordPress entities (`&#8217;` etc.) before putting titles into JSON-LD or llms.txt.
+Example 1: Add llms.txt and a sitemap
+User says: "Add llms.txt and a sitemap to my Next.js site so ChatGPT can read my blog"
+Actions:
+1. Copy the templates as in Install steps 1 and 2, set `SITE_URL` and `BLOG_ORIGIN`.
+2. Run the checks in Install step 6.
+Result: `/llms.txt`, `/llms-full.txt`, `/sitemap.xml` and `/robots.txt` generated live from WordPress posts.
+
+Example 2: FAQ rich results
+User says: "Why doesn't Google show my FAQ in search results?"
+Actions:
+1. Confirm the post has an `<h2>Frequently asked questions</h2>` with `<h3>` questions.
+2. Render `articleJsonLd(post)` on the article page and test it in Google's Rich Results Test.
+Result: BlogPosting + FAQPage JSON-LD on every post.
+
+Example 3: Is AI sending traffic
+User says: "Are ChatGPT or Perplexity sending me visitors?"
+Actions:
+1. Check the ChatGPT / Claude / Perplexity / Gemini / Copilot families in the Traffic sources card.
+2. If the seo-engine runs, query `seo_metrics_daily.ai_visitors` per post.
+Result: AI referral visitors per day and per post.
+
+## Troubleshooting
+
+Symptom: sitemap or llms.txt is empty after a deploy
+Cause: A build-time render snapshotted an **empty** post list because WordPress was only reachable on a private network during the build.
+Solution: Fall back to the public origin, or render on request with `revalidate`.
+
+Symptom: the app cannot read posts, or the files list nothing
+Cause: `/blog/wp-json` is blocked at the proxy.
+Solution: Don't block `/blog/wp-json` if your app reads posts through it.
+
+Symptom: titles show `&#8217;` and similar in JSON-LD or llms.txt
+Cause: WordPress returns HTML entities.
+Solution: Decode WordPress entities before putting titles into JSON-LD or llms.txt.
+
+Symptom: sitemap `<loc>` count does not match your post count
+Cause: Stale build-time render or pagination not followed.
+Solution: Render on request from the WordPress REST API, never from a hand-maintained list.

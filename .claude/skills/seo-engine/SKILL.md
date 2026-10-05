@@ -1,6 +1,11 @@
 ---
 name: seo-engine
-description: Self-improving SEO blog engine. Scouts topics (winner spin-offs from PostHog signups, Search Console gaps, news, releases, seeds), writes and fact-gates posts against facts.json, auto-publishes to a WordPress blog through the Creator OS blog API, and re-weights topic clusters nightly by signups per post. Use when the user asks about blog posts, SEO, the SEO agent, search traffic, spin-offs of a winning post, or wants a specific blog topic written now.
+description: Self-improving SEO blog engine. Scouts topics (winner spin-offs from PostHog signups, Search Console gaps, news, releases, seeds), writes and fact-gates posts against facts.json, auto-publishes to a WordPress blog through the Creator OS blog API, and re-weights topic clusters nightly by signups per post. Use when the user asks about blog posts, SEO, the SEO agent, search traffic, spin-offs of a winning post, setting up or scheduling the scout / publish / measure loop, rejected topics, or wants a specific blog topic written now. For writing or editing one article by hand use wordpress-blog.
+license: MIT
+compatibility: Requires Node 20+, Postgres, a Creator OS API key connected to WordPress, PostHog personal API key, and an Anthropic or OpenAI-compatible model key; Google Search Console service account and IndexNow key optional.
+metadata:
+  author: KevBuildsApps
+  version: 1.0.0
 ---
 
 # SEO engine
@@ -18,6 +23,18 @@ kit and the `wordpress-blog` skill for publishing.
  seeds     ─┘    ^                                                                  |
                  └──────── cluster weights (signups per post, 0.5x to 3x) <─────────┘
 ```
+
+## Critical: the fact gate (do not loosen it)
+
+publish rejects or fixes: em/en dashes (auto), under 700 words, under 4 H2s, `facts.banned`
+strings, recurring prices not in `allowed_prices`, unknown CLI commands, invented flags
+(auto-removed), undocumented API paths (if `api_prefixes` set), unknown internal links
+(auto-unlinked), dead external links (auto-unlinked), missing signup CTA and YouTube link (auto-added).
+Then an LLM audit lists unsupported product claims, competitor fact claims and invented stats.
+Up to 2 rewrites, else the topic is rejected with the reason in `seo_topics.reason`.
+
+Also critical: every topic must be a distinct search intent, competitor posts state only your
+facts, and `facts.json` holds only real, checkable product facts. See Guard rails below.
 
 ## Setup
 
@@ -59,15 +76,6 @@ Write a specific topic now: insert a `seo_topics` row (source 'manual', high sco
 - scout spins the top 3 winners (1+ signup, 15+ entry visitors or 3+ AI visitors in 14 days) into
   6 distinct-intent ideas each: comparison, model, niche, use-case, how-to. Capped per day.
 
-## The fact gate (do not loosen it)
-
-publish rejects or fixes: em/en dashes (auto), under 700 words, under 4 H2s, `facts.banned`
-strings, recurring prices not in `allowed_prices`, unknown CLI commands, invented flags
-(auto-removed), undocumented API paths (if `api_prefixes` set), unknown internal links
-(auto-unlinked), dead external links (auto-unlinked), missing signup CTA and YouTube link (auto-added).
-Then an LLM audit lists unsupported product claims, competitor fact claims and invented stats.
-Up to 2 rewrites, else the topic is rejected with the reason in `seo_topics.reason`.
-
 ## Guard rails (why they exist)
 
 - Google demotes scaled, interchangeable content. Every topic must be a distinct search intent
@@ -80,10 +88,59 @@ Up to 2 rewrites, else the topic is rejected with the reason in `seo_topics.reas
   LLM audit second. Watch `seo_topics.reason` for rejections; if many share a cause, fix `facts.json`.
 - A model being retired shows up as every run failing. `POSTHOG_AI_KEY` makes that visible the same day.
 
-## Debugging
+## Troubleshooting
 
 - `select job, ok, detail, created_at from seo_runs order by id desc limit 20;`
 - `select status, count(*) from seo_topics group by 1;` (queue empty: run scout)
 - `select * from seo_clusters order by weight desc;`
 - `npm run seo:measure -- --days 14` to backfill metrics.
 - Old posts missing a YouTube link: `node --env-file=.env .claude/skills/seo-engine/scripts/add-youtube-links.mjs --apply`.
+
+Error: `CREATOROS_API_KEY missing (Creator OS > Settings > API keys)`
+Cause: No Creator OS key in `.env`.
+Solution: Use the key of the workspace that connected the WordPress blog (see `wordpress-blog`).
+
+Error: `anthropic 4xx/5xx: ...` or `llm 4xx/5xx: ...` on every run
+Cause: Bad model key, or the model was retired.
+Solution: Check `ANTHROPIC_API_KEY` or `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`; pick a current model. `POSTHOG_AI_KEY` makes this visible the same day.
+
+Error: `no JSON in reply` / `unterminated JSON in reply`
+Cause: The model returned prose or truncated output instead of JSON.
+Solution: Rerun; if it repeats, switch to a stronger model.
+
+Symptom: `gsc feed failed` / `gsc metrics failed` / `sitemap submit failed`
+Cause: Search Console service account missing or not an Owner of the property.
+Solution: Set `GSC_SA_JSON_B64` or `GSC_SA_JSON_PATH` and add the service-account email as an Owner. Scout and measure keep running without it.
+
+Symptom: many topics with status rejected
+Cause: The fact gate keeps failing on the same missing fact.
+Solution: Read `seo_topics.reason`; if many share a cause, fix `facts.json`. Do not loosen the gate.
+
+Error: `set youtube_channel in seo.config.json` from `add-youtube-links.mjs`
+Cause: No YouTube channel configured.
+Solution: Add `youtube_channel` to `seo.config.json`.
+
+## Examples
+
+Example 1: First run
+User says: "Set up the SEO agent on my WordPress blog"
+Actions:
+1. Follow Setup steps 1 to 6 (Creator OS key, `seo.config.json`, `facts.json`, `seeds.json`, model key, optional GSC and IndexNow).
+2. Run `npm run seo:scout -- --dry-run` and `npm run seo:publish -- --dry-run`, review the temp post.
+3. Schedule scout 7:30, publish hourly 8..17, measure 22:00 (ET).
+Result: One gated post per publish run, landing live (or as drafts with `SEO_PUBLISH_AS_DRAFT=1`).
+
+Example 2: Write a specific topic now
+User says: "Write a post comparing my product to Buffer today"
+Actions:
+1. Insert a `seo_topics` row (source 'manual', high score).
+2. Run `npm run seo:publish -- --topic <id>`.
+Result: Published post, or a rejection with the reason in `seo_topics.reason`.
+
+Example 3: Spin off a winner
+User says: "My comparison post got signups, write more like it"
+Actions:
+1. Run `npm run seo:measure`, then `npm run seo:scout -- --dry-run` to see the spin-offs.
+2. Run scout for real; publish runs pick them up.
+Result: Up to 6 distinct-intent siblings per winner, capped per day.
+
